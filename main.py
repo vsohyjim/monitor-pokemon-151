@@ -1,48 +1,46 @@
+import requests
+import time
 import os
-import discord
-import asyncio
-from flask import Flask
 
-TOKEN = os.getenv("TOKEN")
-GUILD_ID = int(os.getenv("GUILD_ID"))
-CHANNEL_ID = int(os.getenv("CHANNEL_ID"))
-ALERT_CHANNEL_ID = int(os.getenv("ALERT_CHANNEL_ID"))
+# Pas besoin de .env — Railway injecte les variables automatiquement
+USER_TOKEN = os.environ.get("USER_TOKEN")
+SOURCE_CHANNEL_ID = os.environ.get("SOURCE_CHANNEL_ID")
+WEBHOOK_URL = os.environ.get("WEBHOOK_URL")
 
-message_count = 0
+last_message_id = None
 
-class MyClient(discord.Client):
-    async def on_ready(self):
-        print(f'Connecté en tant que {self.user}')
-        
-    async def on_message(self, message):
-        global message_count
-        if message.channel.id == CHANNEL_ID:
-            message_count += 1
-            if "FNAC" in message.content and message_count == 151:
-                alert_channel = self.get_channel(ALERT_CHANNEL_ID)
-                await alert_channel.send("OK ! Mention détectée au 151e message.")
+headers = {
+    "Authorization": USER_TOKEN,
+    "User-Agent": "Mozilla/5.0",
+    "Content-Type": "application/json"
+}
 
-# Initialisation du bot Discord
-intents = discord.Intents.default()
-intents.messages = True
-client = MyClient(intents=intents)
+def fetch_messages():
+    global last_message_id
+    url = f"https://discord.com/api/v9/channels/{SOURCE_CHANNEL_ID}/messages?limit=10"
+    response = requests.get(url, headers=headers)
+    if response.status_code == 200:
+        messages = response.json()
+        messages.reverse()
+        for msg in messages:
+            if last_message_id is None or msg["id"] > last_message_id:
+                content = msg["content"].lower()
+                if "151" in content and "fnac" in content:
+                    send_to_webhook()
+                last_message_id = msg["id"]
+    else:
+        print(f"Erreur {response.status_code}: {response.text}")
 
-# Serveur Flask minimal pour Railway
-app = Flask(__name__)
+def send_to_webhook():
+    payload = {
+        "content": (
+            "**Restock Bundle 151 sur le Fnac !**\n"
+            "🔗 Lien : https://www.fnac.com/Cartes-a-collectionner-Pokemon-EV3-5-Bundle-de-6-boosters-Ecarlate-et-Violet-151/a17884060/w-4"
+        )
+    }
+    requests.post(WEBHOOK_URL, json=payload)
 
-@app.route('/')
-def home():
-    return "Bot Discord actif!"
-
-async def run_discord_bot():
-    await client.start(TOKEN)
-
-def run_flask():
-    app.run(host="0.0.0.0", port=8080)
-
-# Exécution parallèle
 if __name__ == "__main__":
-    loop = asyncio.get_event_loop()
-    loop.create_task(run_discord_bot())
-    loop.run_until_complete(asyncio.sleep(1))
-    run_flask()
+    while True:
+        fetch_messages()
+        time.sleep(5)
