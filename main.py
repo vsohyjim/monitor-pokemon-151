@@ -6,7 +6,7 @@ from flask import Flask
 TOKEN = os.getenv("TOKEN")
 GUILD_ID = int(os.getenv("GUILD_ID"))
 CHANNEL_ID = int(os.getenv("CHANNEL_ID"))
-ALERT_CHANNEL_ID = int(os.getenv("ALERT"))
+ALERT_CHANNEL_ID = int(os.getenv("ALERT_CHANNEL_ID"))
 
 message_count = 0
 
