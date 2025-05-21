@@ -29,7 +29,7 @@ def fetch_messages():
 
                 for msg in messages:
                     if last_message_id is None or msg["id"] > last_message_id:
-                        send_full_message_to_webhook(msg)
+                        send_as_yora_webhook(msg)
                         last_message_id = msg["id"]
             else:
                 print(f"Erreur {response.status_code}: {response.text}")
@@ -37,33 +37,26 @@ def fetch_messages():
             print(f"Erreur dans fetch_messages: {e}")
         time.sleep(1)
 
-def send_full_message_to_webhook(msg):
+def send_as_yora_webhook(msg):
     content = msg.get("content", "")
-    author = msg["author"]["username"]
-    avatar_url = msg["author"]["avatar"]
-    user_id = msg["author"]["id"]
-
-    avatar = f"https://cdn.discordapp.com/avatars/{user_id}/{avatar_url}.png" if avatar_url else None
 
     payload = {
-        "username": author,
-        "avatar_url": avatar,
-        "content": content,
+        "content": content
     }
 
-    # Gérer les embeds (comme liens Amazon/Dealabs)
-    embeds = msg.get("embeds", [])
-    if embeds:
-        payload["embeds"] = embeds
+    # Transfert des embeds (ex: Amazon, Dealabs, etc.)
+    if msg.get("embeds"):
+        payload["embeds"] = msg["embeds"]
 
-    # Gérer les fichiers joints
+    # Ajout des fichiers (images, docs, etc.)
     attachments = msg.get("attachments", [])
     for att in attachments:
         payload["content"] += f"\n📎 {att['url']}"
 
+    # Envoie avec l’identité par défaut du webhook (donc Yora)
     requests.post(WEBHOOK_URL, json=payload)
 
-# Serveur pour Railway
+# Serveur Railway
 app = Flask(__name__)
 
 @app.route("/")
