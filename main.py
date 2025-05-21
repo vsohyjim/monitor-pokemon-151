@@ -28,9 +28,7 @@ def fetch_messages():
                 messages.reverse()
                 for msg in messages:
                     if last_message_id is None or msg["id"] > last_message_id:
-                        content = msg["content"].lower()
-                        if "151" in content and "fnac" in content:
-                            send_to_webhook()
+                        send_to_webhook(msg)
                         last_message_id = msg["id"]
             else:
                 print(f"Erreur {response.status_code}: {response.text}")
@@ -38,12 +36,11 @@ def fetch_messages():
             print(f"Erreur dans fetch_messages: {e}")
         time.sleep(5)
 
-def send_to_webhook():
+def send_to_webhook(msg):
+    author = msg["author"]["username"]
+    content = msg["content"]
     payload = {
-        "content": (
-            "**Restock Bundle 151 sur le Fnac !**\n"
-            "🔗 Lien : https://www.fnac.com/Cartes-a-collectionner-Pokemon-EV3-5-Bundle-de-6-boosters-Ecarlate-et-Violet-151/a17884060/w-4"
-        )
+        "content": f"**{author}** : {content}"
     }
     requests.post(WEBHOOK_URL, json=payload)
 
