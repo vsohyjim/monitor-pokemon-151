@@ -4,13 +4,16 @@ import os
 import threading
 from flask import Flask
 
+# Variables d’environnement
 USER_TOKEN = os.environ.get("USER_TOKEN")
 SOURCE_CHANNEL_IDS = os.environ.get("SOURCE_CHANNEL_IDS").split(",")
 WEBHOOK_URL = os.environ.get("WEBHOOK_URL")
 BLOCKED_KEYWORDS = [word.strip().lower() for word in os.environ.get("BLOCKED_KEYWORDS", "").split(",")]
 
+# Derniers messages suivis pour chaque canal
 last_message_ids = {channel_id: None for channel_id in SOURCE_CHANNEL_IDS}
 
+# Headers pour requêtes API
 headers = {
     "Authorization": USER_TOKEN,
     "User-Agent": "Mozilla/5.0",
@@ -33,19 +36,41 @@ def fetch_messages(channel_id):
                         if not is_blocked(msg):
                             send_as_yora_webhook(msg)
                         else:
-                            print(f"[{channel_id}] Message ignoré (mot bloqué détecté).")
+                            print(f"[{channel_id}] 🔕 Message bloqué.")
                         last_message_ids[channel_id] = msg["id"]
             else:
-                print(f"[{channel_id}] Erreur {response.status_code}: {response.text}")
+                print(f"[{channel_id}] ❌ Erreur {response.status_code}: {response.text}")
         except Exception as e:
-            print(f"[{channel_id}] Erreur dans fetch_messages: {e}")
+            print(f"[{channel_id}] ⚠️ Erreur dans fetch_messages: {e}")
         time.sleep(1)
 
 def is_blocked(msg):
     content = msg.get("content", "").lower()
+
+    # Vérifie le texte brut
     for keyword in BLOCKED_KEYWORDS:
         if keyword in content:
+            print(f"🔕 Bloqué dans content : {keyword}")
             return True
+
+    # Vérifie les embeds
+    for embed in msg.get("embeds", []):
+        fields_to_check = [
+            embed.get("title", ""),
+            embed.get("description", ""),
+            embed.get("footer", {}).get("text", "")
+        ]
+
+        if "fields" in embed:
+            fields_to_check += [f.get("name", "") + " " + f.get("value", "") for f in embed["fields"]]
+
+        for field in fields_to_check:
+            field_lower = field.lower()
+            for keyword in BLOCKED_KEYWORDS:
+                if keyword in field_lower:
+                    print(f"🔕 Bloqué dans embed : {keyword}")
+                    return True
+
     return False
 
 def send_as_yora_webhook(msg):
@@ -55,16 +80,19 @@ def send_as_yora_webhook(msg):
         "content": content
     }
 
+    # Copie les embeds
     if msg.get("embeds"):
         payload["embeds"] = msg["embeds"]
 
+    # Ajoute les fichiers joints s’il y en a
     attachments = msg.get("attachments", [])
     for att in attachments:
         payload["content"] += f"\n📎 {att['url']}"
 
+    # Envoie le message au webhook Yora
     requests.post(WEBHOOK_URL, json=payload)
 
-# Serveur pour Railway / UptimeRobot
+# Serveur de ping pour Railway ou UptimeRobot
 app = Flask(__name__)
 
 @app.route("/")
