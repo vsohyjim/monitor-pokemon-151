@@ -4,12 +4,11 @@ import os
 import threading
 from flask import Flask
 
-# Variables d’environnement (injectées par Railway ou à définir en local)
 USER_TOKEN = os.environ.get("USER_TOKEN")
-SOURCE_CHANNEL_IDS = os.environ.get("SOURCE_CHANNEL_IDS").split(",")  # ex: "123456789,987654321"
+SOURCE_CHANNEL_IDS = os.environ.get("SOURCE_CHANNEL_IDS").split(",")
 WEBHOOK_URL = os.environ.get("WEBHOOK_URL")
+BLOCKED_KEYWORDS = [word.strip().lower() for word in os.environ.get("BLOCKED_KEYWORDS", "").split(",")]
 
-# Pour chaque channel, on garde son propre last_message_id
 last_message_ids = {channel_id: None for channel_id in SOURCE_CHANNEL_IDS}
 
 headers = {
@@ -31,13 +30,23 @@ def fetch_messages(channel_id):
 
                 for msg in messages:
                     if last_message_ids[channel_id] is None or msg["id"] > last_message_ids[channel_id]:
-                        send_as_yora_webhook(msg)
+                        if not is_blocked(msg):
+                            send_as_yora_webhook(msg)
+                        else:
+                            print(f"[{channel_id}] Message ignoré (mot bloqué détecté).")
                         last_message_ids[channel_id] = msg["id"]
             else:
                 print(f"[{channel_id}] Erreur {response.status_code}: {response.text}")
         except Exception as e:
             print(f"[{channel_id}] Erreur dans fetch_messages: {e}")
         time.sleep(1)
+
+def is_blocked(msg):
+    content = msg.get("content", "").lower()
+    for keyword in BLOCKED_KEYWORDS:
+        if keyword in content:
+            return True
+    return False
 
 def send_as_yora_webhook(msg):
     content = msg.get("content", "")
