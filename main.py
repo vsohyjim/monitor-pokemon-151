@@ -1,19 +1,17 @@
-import discord
 import os
-import time
 import requests
-import threading
+import discord
+import asyncio
 from discord.ext import commands
-from flask import Flask
 
-# === ENV VARS ===
-BOT_TOKEN = os.environ.get("BOT_TOKEN")  # Token du bot Discord
-USER_TOKEN = os.environ.get("USER_TOKEN")  # Token de compte perso (pour scrapper)
-SOURCE_CHANNEL_IDS = os.environ.get("SOURCE_CHANNEL_IDS").split(",")  # Canaux à surveiller
-TARGET_CHANNEL_ID = int(os.environ.get("TARGET_CHANNEL_ID"))  # Channel de destination (où le bot est)
+# === CONFIGURATION VIA ENVIRONNEMENT ===
+BOT_TOKEN = os.environ.get("BOT_TOKEN")  # Ton bot officiel
+USER_TOKEN = os.environ.get("USER_TOKEN")  # Ton token utilisateur (lecture uniquement)
+SOURCE_CHANNEL_IDS = os.environ.get("SOURCE_CHANNEL_IDS").split(",")  # IDs à écouter
+TARGET_CHANNEL_ID = int(os.environ.get("TARGET_CHANNEL_ID"))  # ID où ton bot envoie
 BLOCKED_KEYWORDS = [kw.strip().lower() for kw in os.environ.get("BLOCKED_KEYWORDS", "").split(",")]
 
-# === GLOBAL ===
+# === SETUP ===
 last_message_ids = {channel_id: None for channel_id in SOURCE_CHANNEL_IDS}
 headers = {
     "Authorization": USER_TOKEN,
@@ -21,12 +19,13 @@ headers = {
     "Content-Type": "application/json"
 }
 
-# === DISCORD BOT CLIENT ===
 intents = discord.Intents.default()
 intents.messages = True
 intents.guilds = True
 bot = commands.Bot(command_prefix="!", intents=intents)
 
+
+# === FILTRE MESSAGES BLOQUÉS ===
 def is_blocked(msg):
     content = msg.get("content", "").lower()
 
@@ -50,17 +49,19 @@ def is_blocked(msg):
                 if keyword in field_lower:
                     print(f"🔕 Bloqué dans embed : {keyword}")
                     return True
+
     return False
 
+
+# === TRANSFERT DU MESSAGE AVEC COULEUR ===
 async def forward_to_discord_bot(msg, channel):
-    embed_color = discord.Color(int("9c73cb", 16))  # Hex color #9c73cb
+    embed_color = discord.Color(int("9c73cb", 16))  # Couleur violette #9c73cb
 
     embed = discord.Embed(
-        description=msg.get("content", "") or "*Aucun message textuel*",
+        description=msg.get("content", "") or "*Aucun contenu textuel*",
         color=embed_color
     )
 
-    # Copie les embeds source (titre, description)
     embeds = msg.get("embeds", [])
     if embeds:
         first = embeds[0]
@@ -75,55 +76,52 @@ async def forward_to_discord_bot(msg, channel):
         if first.get("image", {}).get("url"):
             embed.set_image(url=first["image"]["url"])
 
-    # Ajoute les fichiers joints
     attachments = msg.get("attachments", [])
     for att in attachments:
         embed.add_field(name="📎 Fichier", value=att["url"], inline=False)
 
     await channel.send(embed=embed)
 
-def fetch_messages():
-    @bot.event
-    async def on_ready():
-        print(f"✅ Bot connecté en tant que {bot.user}")
-        while True:
-            for source_id in SOURCE_CHANNEL_IDS:
-                try:
-                    url = f"https://discord.com/api/v9/channels/{source_id}/messages?limit=5"
-                    response = requests.get(url, headers=headers)
-                    if response.status_code != 200:
-                        print(f"[{source_id}] ❌ Erreur API : {response.status_code}")
-                        continue
 
-                    messages = response.json()
-                    messages.reverse()
+# === LECTURE DES MESSAGES (via USER_TOKEN) ===
+async def fetch_messages():
+    await bot.wait_until_ready()
+    print(f"✅ Connecté en tant que {bot.user}")
 
-                    for msg in messages:
-                        if last_message_ids[source_id] is None or msg["id"] > last_message_ids[source_id]:
-                            if not is_blocked(msg):
-                                target_channel = bot.get_channel(TARGET_CHANNEL_ID)
-                                if target_channel:
-                                    await forward_to_discord_bot(msg, target_channel)
-                                else:
-                                    print("❌ Canal de destination introuvable.")
+    while True:
+        for source_id in SOURCE_CHANNEL_IDS:
+            try:
+                url = f"https://discord.com/api/v9/channels/{source_id}/messages?limit=5"
+                response = requests.get(url, headers=headers)
+
+                if response.status_code != 200:
+                    print(f"[{source_id}] ❌ Erreur API : {response.status_code}")
+                    continue
+
+                messages = response.json()
+                messages.reverse()
+
+                for msg in messages:
+                    if last_message_ids[source_id] is None or msg["id"] > last_message_ids[source_id]:
+                        if not is_blocked(msg):
+                            target_channel = bot.get_channel(TARGET_CHANNEL_ID)
+                            if target_channel:
+                                await forward_to_discord_bot(msg, target_channel)
                             else:
-                                print(f"[{source_id}] 🔕 Message bloqué.")
-                            last_message_ids[source_id] = msg["id"]
-                except Exception as e:
-                    print(f"[{source_id}] ⚠️ Erreur dans fetch_messages: {e}")
-            await asyncio.sleep(1)
+                                print("❌ Channel destination introuvable.")
+                        else:
+                            print(f"[{source_id}] 🔕 Message ignoré.")
+                        last_message_ids[source_id] = msg["id"]
+            except Exception as e:
+                print(f"[{source_id}] ⚠️ Erreur dans fetch_messages: {e}")
+        await asyncio.sleep(1)
 
-    bot.loop.create_task(on_ready())
-    bot.run(BOT_TOKEN)
 
-# === FLASK SERVER POUR RAILWAY ===
-app = Flask(__name__)
+@bot.event
+async def on_ready():
+    bot.loop.create_task(fetch_messages())
 
-@app.route("/")
-def index():
-    return "Bot actif avec forwarding personnalisé ✅", 200
 
+# === LANCEMENT DU BOT ===
 if __name__ == "__main__":
-    thread = threading.Thread(target=fetch_messages)
-    thread.start()
-    app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 3000)))
+    bot.run(BOT_TOKEN)
