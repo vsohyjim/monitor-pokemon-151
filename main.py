@@ -3,29 +3,32 @@ import requests
 import discord
 import asyncio
 from discord.ext import commands
+from datetime import datetime
 
-# === CONFIGURATION VIA ENVIRONNEMENT ===
-BOT_TOKEN = os.environ.get("BOT_TOKEN")  # Ton bot officiel
-USER_TOKEN = os.environ.get("USER_TOKEN")  # Ton token utilisateur (lecture uniquement)
-SOURCE_CHANNEL_IDS = os.environ.get("SOURCE_CHANNEL_IDS").split(",")  # IDs à écouter
-TARGET_CHANNEL_ID = int(os.environ.get("TARGET_CHANNEL_ID"))  # ID où ton bot envoie
+# === CONFIGURATION ===
+BOT_TOKEN = os.environ.get("BOT_TOKEN")
+USER_TOKEN = os.environ.get("USER_TOKEN")
+SOURCE_CHANNEL_IDS = os.environ.get("SOURCE_CHANNEL_IDS").split(",")
+TARGET_CHANNEL_ID = int(os.environ.get("TARGET_CHANNEL_ID"))
 BLOCKED_KEYWORDS = [kw.strip().lower() for kw in os.environ.get("BLOCKED_KEYWORDS", "").split(",")]
 
-# === SETUP ===
 last_message_ids = {channel_id: None for channel_id in SOURCE_CHANNEL_IDS}
+
 headers = {
     "Authorization": USER_TOKEN,
     "User-Agent": "Mozilla/5.0",
     "Content-Type": "application/json"
 }
 
+# === DISCORD BOT SETUP ===
 intents = discord.Intents.default()
 intents.messages = True
 intents.guilds = True
+
 bot = commands.Bot(command_prefix="!", intents=intents)
 
 
-# === FILTRE MESSAGES BLOQUÉS ===
+# === FILTRE MOTS INTERDITS ===
 def is_blocked(msg):
     content = msg.get("content", "").lower()
 
@@ -53,37 +56,53 @@ def is_blocked(msg):
     return False
 
 
-# === TRANSFERT DU MESSAGE AVEC COULEUR ===
+# === TRANSFERT DU MESSAGE AVEC REBRANDING ===
 async def forward_to_discord_bot(msg, channel):
-    embed_color = discord.Color(int("9c73cb", 16))  # Couleur violette #9c73cb
+    now = datetime.now().strftime("%H:%M")
+    guild_icon = channel.guild.icon.url if channel.guild.icon else None
+    embed_color = discord.Color(int("9c73cb", 16))  # violet
 
-    embed = discord.Embed(
-        description=msg.get("content", "") or "*Aucun contenu textuel*",
-        color=embed_color
-    )
+    for original in msg.get("embeds", []):
+        embed = discord.Embed(
+            title=original.get("title", discord.Embed.Empty),
+            description=original.get("description", discord.Embed.Empty),
+            url=original.get("url", discord.Embed.Empty),
+            color=embed_color
+        )
 
-    embeds = msg.get("embeds", [])
-    if embeds:
-        first = embeds[0]
-        if first.get("title"):
-            embed.title = first["title"]
-        if first.get("description"):
-            embed.description += f"\n\n{first['description']}"
-        if first.get("url"):
-            embed.url = first["url"]
-        if first.get("thumbnail", {}).get("url"):
-            embed.set_thumbnail(url=first["thumbnail"]["url"])
-        if first.get("image", {}).get("url"):
-            embed.set_image(url=first["image"]["url"])
+        # Champs personnalisés
+        if "fields" in original:
+            for field in original["fields"]:
+                embed.add_field(
+                    name=field.get("name", "—"),
+                    value=field.get("value", "—"),
+                    inline=field.get("inline", True)
+                )
 
-    attachments = msg.get("attachments", [])
-    for att in attachments:
-        embed.add_field(name="📎 Fichier", value=att["url"], inline=False)
+        # Images
+        if original.get("image", {}).get("url"):
+            embed.set_image(url=original["image"]["url"])
+        if original.get("thumbnail", {}).get("url"):
+            embed.set_thumbnail(url=original["thumbnail"]["url"])
 
-    await channel.send(embed=embed)
+        # Footer rebrandé
+        embed.set_footer(
+            text=f"YVORA • {now}",
+            icon_url=guild_icon
+        )
+
+        await channel.send(embed=embed)
+
+    # Texte brut (hors embed)
+    if msg.get("content"):
+        await channel.send(msg["content"])
+
+    # Fichiers joints
+    for att in msg.get("attachments", []):
+        await channel.send(f"📎 {att['url']}")
 
 
-# === LECTURE DES MESSAGES (via USER_TOKEN) ===
+# === SCRAP DES MESSAGES VIA TOKEN UTILISATEUR ===
 async def fetch_messages():
     await bot.wait_until_ready()
     print(f"✅ Connecté en tant que {bot.user}")
@@ -110,7 +129,7 @@ async def fetch_messages():
                             else:
                                 print("❌ Channel destination introuvable.")
                         else:
-                            print(f"[{source_id}] 🔕 Message ignoré.")
+                            print(f"[{source_id}] 🔕 Message bloqué.")
                         last_message_ids[source_id] = msg["id"]
             except Exception as e:
                 print(f"[{source_id}] ⚠️ Erreur dans fetch_messages: {e}")
@@ -122,6 +141,6 @@ async def on_ready():
     bot.loop.create_task(fetch_messages())
 
 
-# === LANCEMENT DU BOT ===
+# === DÉMARRAGE DU BOT ===
 if __name__ == "__main__":
     bot.run(BOT_TOKEN)
