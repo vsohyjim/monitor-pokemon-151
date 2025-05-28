@@ -10,10 +10,10 @@ SOURCE_CHANNEL_IDS = os.environ.get("SOURCE_CHANNEL_IDS").split(",")
 WEBHOOK_URL = os.environ.get("WEBHOOK_URL")
 BLOCKED_KEYWORDS = [word.strip().lower() for word in os.environ.get("BLOCKED_KEYWORDS", "").split(",")]
 
-# Dernier message traité par channel
+# Derniers messages suivis pour chaque canal
 last_message_ids = {channel_id: None for channel_id in SOURCE_CHANNEL_IDS}
 
-# Headers API Discord
+# Headers pour requêtes API
 headers = {
     "Authorization": USER_TOKEN,
     "User-Agent": "Mozilla/5.0",
@@ -47,13 +47,13 @@ def fetch_messages(channel_id):
 def is_blocked(msg):
     content = msg.get("content", "").lower()
 
-    # Vérification du texte brut
+    # Vérifie le texte brut
     for keyword in BLOCKED_KEYWORDS:
         if keyword in content:
             print(f"🔕 Bloqué dans content : {keyword}")
             return True
 
-    # Vérification dans les embeds
+    # Vérifie les embeds
     for embed in msg.get("embeds", []):
         fields_to_check = [
             embed.get("title", ""),
@@ -80,22 +80,19 @@ def send_as_yora_webhook(msg):
         "content": content
     }
 
-    embeds = msg.get("embeds", [])
-    if embeds:
-        # Couleur violette personnalisée #9c73cb
-        purple_int = int("9c73cb", 16)
-        for embed in embeds:
-            embed["color"] = purple_int
-        payload["embeds"] = embeds
+    # Copie les embeds
+    if msg.get("embeds"):
+        payload["embeds"] = msg["embeds"]
 
-    # Ajout des pièces jointes
+    # Ajoute les fichiers joints s’il y en a
     attachments = msg.get("attachments", [])
     for att in attachments:
         payload["content"] += f"\n📎 {att['url']}"
 
+    # Envoie le message au webhook Yora
     requests.post(WEBHOOK_URL, json=payload)
 
-# Serveur Railway / UptimeRobot
+# Serveur de ping pour Railway ou UptimeRobot
 app = Flask(__name__)
 
 @app.route("/")
