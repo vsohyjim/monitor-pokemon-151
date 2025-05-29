@@ -8,12 +8,16 @@ from flask import Flask
 USER_TOKEN = os.environ.get("USER_TOKEN")
 SOURCE_CHANNEL_IDS = os.environ.get("SOURCE_CHANNEL_IDS").split(",")
 WEBHOOK_URL = os.environ.get("WEBHOOK_URL")
-BLOCKED_KEYWORDS = [word.strip().lower() for word in os.environ.get("BLOCKED_KEYWORDS", "").split(",")]
+BLOCKED_KEYWORDS = [
+    word.strip().lower()
+    for word in os.environ.get("BLOCKED_KEYWORDS", "").split(",")
+    if word.strip()
+]
 
-# Derniers messages suivis pour chaque canal
+# Dernier message traité par channel
 last_message_ids = {channel_id: None for channel_id in SOURCE_CHANNEL_IDS}
 
-# Headers pour requêtes API
+# Headers API Discord
 headers = {
     "Authorization": USER_TOKEN,
     "User-Agent": "Mozilla/5.0",
@@ -80,19 +84,22 @@ def send_as_yora_webhook(msg):
         "content": content
     }
 
-    # Copie les embeds
-    if msg.get("embeds"):
-        payload["embeds"] = msg["embeds"]
+    embeds = msg.get("embeds", [])
+    if embeds:
+        # Couleur personnalisée violette #9c73cb
+        purple_int = int("9c73cb", 16)
+        for embed in embeds:
+            embed["color"] = purple_int
+        payload["embeds"] = embeds
 
-    # Ajoute les fichiers joints s’il y en a
+    # Ajout des fichiers joints s’il y en a
     attachments = msg.get("attachments", [])
     for att in attachments:
         payload["content"] += f"\n📎 {att['url']}"
 
-    # Envoie le message au webhook Yora
     requests.post(WEBHOOK_URL, json=payload)
 
-# Serveur de ping pour Railway ou UptimeRobot
+# Serveur Railway / UptimeRobot
 app = Flask(__name__)
 
 @app.route("/")
